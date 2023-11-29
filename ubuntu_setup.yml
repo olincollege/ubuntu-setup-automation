@@ -1,0 +1,113 @@
+---
+- hosts: localhost
+  connection: local
+  become: yes
+  tasks:
+    - name: Update and upgrade apt packages
+      apt:
+        update_cache: yes
+        upgrade: dist
+
+    - name: Install essential packages
+      apt:
+        name:
+          - curl
+          - git
+          - vim
+          - wget
+          - build-essential
+        state: present
+
+    - name: Install Python 3
+      apt:
+        name: python3
+        state: present
+
+    #TODO: Timezone is causing issues, continue troubleshooting
+    - name: Set timezone
+      timezone:
+        name: 'America/New_York'
+
+    # Installing Visual Studio Code
+    - name: Install Visual Studio Code
+      block:
+        - name: Add VSCode repository
+          apt_repository:
+            repo: 'deb [arch=amd64] http://packages.microsoft.com/repos/vscode stable main'
+            state: present
+
+        - name: Import Microsoft GPG key
+          apt_key:
+            url: https://packages.microsoft.com/keys/microsoft.asc
+            state: present
+
+        - name: Install VSCode
+          apt:
+            name: code
+            state: latest
+
+    - name: Install Flameshot for screenshots
+      apt:
+        name: flameshot
+        state: present
+
+    - name: Install GParted for disk management
+      apt:
+        name: gparted
+        state: present
+
+    # Spotify Installation
+    - name: Add Spotify repository signing keys
+      apt_key:
+        url: https://download.spotify.com/debian/pubkey_0D811D58.gpg
+        state: present
+
+    - name: Add Spotify repository
+      apt_repository:
+        repo: 'deb http://repository.spotify.com stable non-free'
+        state: present
+
+    - name: Install Spotify
+      apt:
+        name: spotify-client
+        state: present
+        update_cache: yes
+
+    # Steam Installation
+    - name: Enable multiverse repository for Steam
+      apt_repository:
+        repo: 'deb http://archive.ubuntu.com/ubuntu multiverse'
+        state: present
+
+    - name: Install Steam
+      apt:
+        name: steam
+        state: present
+        update_cache: yes
+
+    # Google Chrome Installation
+    - name: Download Google Chrome signing key
+      ansible.builtin.get_url:
+        url: https://dl.google.com/linux/linux_signing_key.pub
+        dest: /tmp/google-chrome-signing-key.pub
+
+    - name: Add Google Chrome signing key
+      ansible.builtin.apt_key:
+        file: /tmp/google-chrome-signing-key.pub
+        state: present
+
+    - name: Add Google Chrome repository
+      ansible.builtin.apt_repository:
+        repo: 'deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main'
+        state: present
+        update_cache: yes
+
+    - name: Install Google Chrome
+      ansible.builtin.apt:
+        name: google-chrome-stable
+        state: latest
+
+    - name: Clean up apt cache
+      apt:
+        autoclean: yes
+        autoremove: yes
