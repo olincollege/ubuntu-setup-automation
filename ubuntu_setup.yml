@@ -8,6 +8,15 @@
         update_cache: yes
         upgrade: dist
 
+    - name: Wait for apt-get lock to be released
+      command: lsof /var/lib/apt/lists/lock
+      register: lock_status
+      failed_when: lock_status.rc == 0
+      until: lock_status is failed
+      retries: 10  # Number of retries
+      delay: 1   # Delay in seconds between retries
+
+
     - name: Install essential packages
       apt:
         name:
@@ -29,22 +38,21 @@
         name: 'America/New_York'
 
     # Installing Visual Studio Code
-    - name: Install Visual Studio Code
-      block:
-        - name: Add VSCode repository
-          apt_repository:
-            repo: 'deb [arch=amd64] http://packages.microsoft.com/repos/vscode stable main'
-            state: present
+    - name: Import Microsoft GPG key for VSCode
+      ansible.builtin.apt_key:
+        url: https://packages.microsoft.com/keys/microsoft.asc
+        state: present
 
-        - name: Import Microsoft GPG key
-          apt_key:
-            url: https://packages.microsoft.com/keys/microsoft.asc
-            state: present
+    - name: Add VSCode repository
+      ansible.builtin.apt_repository:
+        repo: 'deb [arch=amd64,signed-by=/usr/share/keyrings/microsoft-archive-keyring.gpg] http://packages.microsoft.com/repos/vscode stable main'
+        state: present
 
-        - name: Install VSCode
-          apt:
-            name: code
-            state: latest
+    - name: Install VSCode
+      ansible.builtin.apt:
+        name: code
+        state: latest
+        update_cache: yes
 
     - name: Install Flameshot for screenshots
       apt:
@@ -57,15 +65,17 @@
         state: present
 
     # Spotify Installation
-    - name: Add Spotify repository signing keys
-      apt_key:
-        url: https://download.spotify.com/debian/pubkey_0D811D58.gpg
-        state: present
+    - name: Copy Spotify GPG key
+      copy:
+        src: 
+        dest: /usr/share/keyrings/spotify-archive-keyring.gpg
+        mode: '0644'
 
     - name: Add Spotify repository
       apt_repository:
-        repo: 'deb http://repository.spotify.com stable non-free'
+        repo: 'deb [signed-by=/usr/share/keyrings/spotify-archive-keyring.gpg] http://repository.spotify.com stable non-free'
         state: present
+        update_cache: yes
 
     - name: Install Spotify
       apt:
