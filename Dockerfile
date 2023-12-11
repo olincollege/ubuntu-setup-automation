@@ -5,7 +5,7 @@ FROM ubuntu:latest
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Update and Install Python, SSH, and tzdata
-RUN apt-get update && apt-get install -y python3 python3-pip ssh tzdata
+RUN apt-get update && apt-get install -y python3 python3-apt python3-pip ssh tzdata
 
 # Install Ansible
 RUN pip3 install ansible

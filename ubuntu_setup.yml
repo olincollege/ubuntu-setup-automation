@@ -2,21 +2,26 @@
 - hosts: localhost
   connection: local
   become: yes
+  vars:
+    apt_key_download_path: /tmp/microsoft.asc
+    apt_keyring_path: /etc/apt/keyrings/microsoft.gpg
+    docker_key_download_path: /tmp/docker.asc
+    docker_keyring_path: /etc/apt/keyrings/docker.gpg
+    spotify_key_download_path: /tmp/spotify.asc
+    spotify_keyring_path: /etc/apt/keyrings/spotify.gpg
+    act_install_script_path: /tmp/act.sh
   tasks:
     - name: Update and upgrade apt packages
       apt:
         update_cache: yes
         upgrade: dist
-
     - name: Wait for apt-get lock to be released
       command: lsof /var/lib/apt/lists/lock
       register: lock_status
       failed_when: lock_status.rc == 0
       until: lock_status is failed
-      retries: 10  # Number of retries
+      retries: 1  # Number of retries
       delay: 1   # Delay in seconds between retries
-
-
     - name: Install essential packages
       apt:
         name:
@@ -25,98 +30,130 @@
           - vim
           - wget
           - build-essential
+          - python3
         state: present
-
-    - name: Install Python 3
-      apt:
-        name: python3
-        state: present
-
-    #TODO: Timezone is causing issues, continue troubleshooting
     - name: Set timezone
       timezone:
         name: 'America/New_York'
-
     # Installing Visual Studio Code
-    - name: Import Microsoft GPG key for VSCode
-      ansible.builtin.apt_key:
-        url: https://packages.microsoft.com/keys/microsoft.asc
-        state: present
-
-    - name: Add VSCode repository
-      ansible.builtin.apt_repository:
-        repo: 'deb [arch=amd64,signed-by=/usr/share/keyrings/microsoft-archive-keyring.gpg] http://packages.microsoft.com/repos/vscode stable main'
-        state: present
-
-    - name: Install VSCode
-      ansible.builtin.apt:
-        name: code
-        state: latest
-        update_cache: yes
-
+    - name: Install VSCode (apt)
+      when: ansible_facts['distribution'] == "Ubuntu"
+      block:
+        - name: Install GPG
+          apt:
+            name: gpg
+        - name: Get Microsoft GPG key needed to add package repo
+          get_url:
+            url: https://packages.microsoft.com/keys/microsoft.asc
+            dest: "{{ apt_key_download_path }}"
+            force: true
+          when: not ansible_check_mode
+          register: download_gpg_key
+        - name: Dearmor GPG key and add to keyring
+          command: gpg --yes --dearmor -o {{ apt_keyring_path }} {{ apt_key_download_path }}
+          when: download_gpg_key.changed
+        - name: Get architecture name from dpkg
+          command: dpkg --print-architecture
+          changed_when: false
+          register: dpkg_arch
+        - name: Add VSCode repository
+          apt_repository:
+            filename: vscode
+            repo: "deb [arch={{ dpkg_arch.stdout }} signed-by={{ apt_keyring_path }}] https://packages.microsoft.com/repos/code stable main"
+            state: present
+            update_cache: true
+        - name: Install VSCode (apt)
+          apt:
+            name: code
+            state: present
+    - name: Install Spotify (apt)
+      when: ansible_facts['distribution'] == "Ubuntu"
+      block:
+        - name: Install GPG
+          apt:
+            name: gpg
+        - name: Get Spotify GPG key needed to add package repo
+          ansible.builtin.get_url:
+            url: https://download.spotify.com/debian/pubkey_7A3A762FAFD4A51F.gpg
+            dest: "{{ spotify_key_download_path }}"
+            force: true
+          when: not ansible_check_mode  # (Bug ansible/ansible#65687)
+          register: download_gpg_key
+        - name: Dearmor GPG key and add to keyring
+          become: true
+          ansible.builtin.command:
+            # The --yes flag ensures that the output keyring is overwritten in
+            # case a new file was downloaded in the previous task.
+            cmd: >-
+              gpg --yes --dearmor -o {{ spotify_keyring_path }} {{ spotify_key_download_path }}
+          when: download_gpg_key.changed
+        - name: Get architecture name from dpkg
+          ansible.builtin.command:
+            cmd: dpkg --print-architecture
+          changed_when: false
+          register: dpkg_arch
+        - name: Add Spotify repository
+          become: true
+          apt_repository:
+            filename: spotify
+            repo: 'deb [arch={{ dpkg_arch.stdout }} signed-by={{ spotify_keyring_path }}] http://repository.spotify.com stable non-free'
+            state: present
+            update_cache: true
+        - name: Install Spotify (apt)
+          become: true
+          ansible.builtin.apt:
+            name: spotify-client
+            state: present
     - name: Install Flameshot for screenshots
       apt:
         name: flameshot
         state: present
-
     - name: Install GParted for disk management
       apt:
         name: gparted
         state: present
-
-    # Spotify Installation
-    - name: Copy Spotify GPG key
-      copy:
-        src: 
-        dest: /usr/share/keyrings/spotify-archive-keyring.gpg
-        mode: '0644'
-
-    - name: Add Spotify repository
-      apt_repository:
-        repo: 'deb [signed-by=/usr/share/keyrings/spotify-archive-keyring.gpg] http://repository.spotify.com stable non-free'
-        state: present
-        update_cache: yes
-
-    - name: Install Spotify
-      apt:
-        name: spotify-client
-        state: present
-        update_cache: yes
-
-    # Steam Installation
-    - name: Enable multiverse repository for Steam
-      apt_repository:
-        repo: 'deb http://archive.ubuntu.com/ubuntu multiverse'
-        state: present
-
     - name: Install Steam
-      apt:
-        name: steam
-        state: present
-        update_cache: yes
-
+      when: ansible_facts['distribution'] == "Ubuntu"
+      block:
+        - name: Add i386 architecture
+          ansible.builtin.command:
+            cmd: dpkg --add-architecture i386
+          become: yes
+        - name: Update cache
+          apt:
+            update_cache: yes
+        - name: Install dependencies
+          apt:
+            name:
+              - gdebi-core
+              - libgl1-mesa-glx:i386
+            state: present
+        - name: Download Steam installer
+          ansible.builtin.get_url:
+            url: 'https://steamcdn-a.akamaihd.net/client/installer/steam.deb'
+            dest: '~/steam.deb'
+            mode: '0755'
+        - name: Install Steam
+          ansible.builtin.shell:
+            cmd: gdebi --non-interactive ~/steam.deb
     # Google Chrome Installation
     - name: Download Google Chrome signing key
       ansible.builtin.get_url:
         url: https://dl.google.com/linux/linux_signing_key.pub
         dest: /tmp/google-chrome-signing-key.pub
-
     - name: Add Google Chrome signing key
       ansible.builtin.apt_key:
         file: /tmp/google-chrome-signing-key.pub
         state: present
-
     - name: Add Google Chrome repository
       ansible.builtin.apt_repository:
         repo: 'deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main'
         state: present
         update_cache: yes
-
     - name: Install Google Chrome
       ansible.builtin.apt:
         name: google-chrome-stable
         state: latest
-
     - name: Clean up apt cache
       apt:
         autoclean: yes
